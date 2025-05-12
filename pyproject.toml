@@ -1,0 +1,35 @@
+[project]
+name = "peptide-rt-transformer"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch (>=2.7.0,<3.0.0)",
+    "torchvision (>=0.22.0,<0.23.0)",
+    "torchaudio (>=2.7.0,<3.0.0)",
+    "matplotlib (>=3.10.3,<4.0.0)",
+    "scipy (>=1.15.3,<2.0.0)",
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[[tool.poetry.source]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+priority = "supplemental"
+
+[tool.poetry.dependencies]
+torch = {source = "pytorch-cu128"}
+torchvision = {source = "pytorch-cu128"}
+torchaudio = {source = "pytorch-cu128"}
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
