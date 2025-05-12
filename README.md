@@ -1,6 +1,6 @@
 # PeptideRT-Transformer
 
-A PyTorch implementation of a peptide retention time predictor using a Transformer decoder with multiple learnable query tokens and attention pooling before the regression head. The model leverages cross-attention from learned queries to peptide sequence embeddings for accurate RT prediction. Configurable and GPU-ready for proteomics machine learning tasks.
+A PyTorch implementation of a peptide retention time predictor using Transformer encoder or decoder architectures. The encoder model uses attention pooling over sequence embeddings, while the decoder model supports multiple learnable query tokens with cross-attention to peptide embeddings before the regression head. Both are configurable and GPU-ready for proteomics machine learning tasks.
 
 ## Project Structure
 
@@ -8,8 +8,10 @@ A PyTorch implementation of a peptide retention time predictor using a Transform
 data/         # Peptide datasets (TXT: <peptide>\t<rt>)
 docs/         # Documentation
 src/          # Source code (model, dataset, tokenizer, utils, main script)
-PeptideRT_Train.ipynb   # Jupyter notebook for training
-PeptideRT_Eval.ipynb    # Jupyter notebook for evaluation
+PeptideRT_Encoder_Train.ipynb    # Jupyter notebook for encoder training
+PeptideRT_Encoder_Eval.ipynb     # Jupyter notebook for encoder evaluation
+PeptideRT_Decoder_Train.ipynb    # Jupyter notebook for decoder training
+PeptideRT_Decoder_Eval.ipynb     # Jupyter notebook for decoder evaluation
 ```
 
 ## Installation
@@ -22,17 +24,22 @@ poetry install
 
 ## How to Train
 
-The main training script is `src/rt_transformer.py`.
-It trains the model on a peptide RT dataset and saves the weights to `rt_model.pt`.
+The main training script is `src/rt_transformer.py`. It trains the model on a peptide RT dataset and saves the weights to either `rt_encoder_model.pt` or `rt_decoder_model.pt`, depending on the chosen architecture.
 
 **Example usage:**
 ```bash
-poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 20 --d_model 256 --layers 10 --queries 4
+python src/rt_transformer.py --data data/mouse.txt --epochs 20 --d_model 256 --layers 10 --arch encoder
+python src/rt_transformer.py --data data/mouse.txt --epochs 20 --d_model 256 --layers 10 --arch decoder --queries 4
 ```
+- Use `--arch encoder` or `--arch decoder` to select the model architecture.
 - Use `--data` to specify your dataset (TXT file: `<peptide>\t<rt>`).
-- Other arguments control model size, number of layers, queries, etc.
+- Other arguments control hyperparameters such as model size, number of layers, number of queries, learning rate, and more.
 
 ## Jupyter Notebooks
 
-- **PeptideRT_Train.ipynb**: Interactive training and exploration.
-- **PeptideRT_Eval.ipynb**: Model evaluation and visualization.
+- **PeptideRT_Encoder_Train.ipynb**: Interactive training and exploration for the encoder model.
+- **PeptideRT_Encoder_Eval.ipynb**: Evaluation and visualization for the encoder model.
+- **PeptideRT_Decoder_Train.ipynb**: Interactive training and exploration for the decoder model.
+- **PeptideRT_Decoder_Eval.ipynb**: Evaluation and visualization for the decoder model.
+
+---

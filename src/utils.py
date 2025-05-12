@@ -29,7 +29,7 @@ def run_epoch(model, loader, loss_fn, opt=None, device="cpu"):
     for seqs, mask, rts in loader:
         seqs, mask, rts = seqs.to(device), mask.to(device), rts.to(device)
         preds = model(seqs, mask)         # forward pass
-        loss  = loss_fn(preds, rts)       # compute MSE loss
+        loss  = loss_fn(preds, rts)       # compute loss
         if train:
             opt.zero_grad(set_to_none=True)
             loss.backward()

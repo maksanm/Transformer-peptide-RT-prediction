@@ -9,10 +9,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from dataset import PeptideRTDataset, collate
-from model import PeptideRTModel
+from model import PeptideRTEncoderModel, PeptideRTDecoderModel
 from tokenizer import AATokenizer
 from utils import run_epoch, split_dataset, compute_metrics
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -25,7 +24,9 @@ def main():
     parser.add_argument("--layers",  type=int, default=10)
     parser.add_argument("--lr",      type=float, default=3e-4)
     parser.add_argument("--seed",    type=int, default=42)
-    parser.add_argument("--queries",    type=int, default=4)
+    parser.add_argument("--queries", type=int, default=4)
+    parser.add_argument("--arch", choices=["encoder", "decoder"], default="encoder",
+                        help="Model architecture: encoder or decoder")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed); random.seed(args.seed)
@@ -40,11 +41,24 @@ def main():
                               shuffle=False, collate_fn=coll)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model  = PeptideRTModel(tokenizer,
-                            d_model=args.d_model,
-                            n_heads=args.heads,
-                            d_ff=4*args.d_model,
-                            n_layers=args.layers).to(device)
+
+    if args.arch == "encoder":
+        model = PeptideRTEncoderModel(
+            tokenizer,
+            d_model=args.d_model,
+            n_heads=args.heads,
+            d_ff=4*args.d_model,
+            n_layers=args.layers
+        ).to(device)
+    else:
+        model = PeptideRTDecoderModel(
+            tokenizer,
+            d_model=args.d_model,
+            n_heads=args.heads,
+            d_ff=4*args.d_model,
+            n_layers=args.layers,
+            n_queries=args.queries
+        ).to(device)
 
     opt     = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_fn = nn.SmoothL1Loss()
@@ -54,7 +68,10 @@ def main():
         vl_loss = run_epoch(model, val_loader,   loss_fn, None, device)
         print(f"Epoch {epoch:3d} | train loss {tr_loss:.4e} | val loss {vl_loss:.4e}")
 
-    torch.save(model.state_dict(), "rt_model.pt")
+    if args.arch == "encoder":
+        torch.save(model.state_dict(), "rt_encoder_model.pt")
+    else:
+        torch.save(model.state_dict(), "rt_decoder_model.pt")
     print("✔ done.")
 
 if __name__ == "__main__":
