@@ -2,6 +2,8 @@ import random
 
 import torch
 from torch.utils.data import Dataset
+import numpy as np
+from typing import List, Tuple
 
 from scipy.stats import spearmanr
 
@@ -40,20 +42,50 @@ def run_epoch(model, loader, loss_fn, opt=None, device="cpu"):
 
 def compute_metrics(y_pred, y_true):
     """
-    Copmputes the most popular metrics.
+    Computes comprehensive regression metrics.
+    Returns dictionary containing various regression metrics
     """
-    # y_pred, y_true: torch tensors, shape (N,)
-    mae = torch.mean(torch.abs(y_pred - y_true)).item()
-    mse = torch.mean((y_pred - y_true) ** 2).item()
-    # R2
+    metrics = {}
+
+    # Basic error metrics
+    errors = y_pred - y_true
+    abs_errors = torch.abs(errors)
+    squared_errors = errors ** 2
+
+    # First-order error metrics
+    metrics['MAE'] = torch.mean(abs_errors).item()  # Mean Absolute Error (average magnitude of errors)
+    metrics['MSE'] = torch.mean(squared_errors).item()  # Mean Squared Error (sensitive to outliers)
+    metrics['RMSE'] = torch.sqrt(torch.tensor(metrics['MSE'])).item()   # Root Mean Squared Error (in original units)
+
+    # Additional error metrics
+    metrics['Max_Abs_Error'] = torch.max(abs_errors).item()  # Worst-case error
+    metrics['Median_Abs_Error'] = torch.median(abs_errors).item()  # Median error (sensitive to outliers)
+    metrics['Mean_Abs_Percentage_Error'] = torch.mean(abs_errors / torch.abs(y_true)).item()  # Relative error as percentage
+
+    # Variability metrics
+    metrics['Std_Error'] = torch.std(errors).item()  # Standard deviation of errors (consistency of errors)
+    metrics['Std_True'] = torch.std(y_true).item()  # Natural variability in true values
+    metrics['Std_Pred'] = torch.std(y_pred).item()  # Variability in predictions (should match Std_True)
+
+    # Model performance metrics
+    # R-squared: Proportion of variance explained (1 = perfect fit, 0 = no better than mean)
     y_true_mean = torch.mean(y_true)
     ss_tot = torch.sum((y_true - y_true_mean) ** 2)
-    ss_res = torch.sum((y_true - y_pred) ** 2)
-    r2 = 1 - ss_res / ss_tot
-    # Pearson
+    ss_res = torch.sum(squared_errors)
+    metrics['R2'] = (1 - ss_res / ss_tot).item()
+
+    # Explained variance: Proportion of variance explained (like R2 but ignores mean offset bias)
+    # Near-identical R2 and Explained_Variance -> no major bias in errors, errors balance out around 0
+    metrics['Explained_Variance'] = (1 - torch.var(errors) / torch.var(y_true)).item()
+
+    # Correlation metrics
+    # Pearson: Linear correlation (-1 to 1)
     vx = y_pred - torch.mean(y_pred)
     vy = y_true - torch.mean(y_true)
-    pearson = torch.sum(vx * vy) / (torch.norm(vx) * torch.norm(vy))
-    # Spearman (convert to numpy)
-    spearman = spearmanr(y_pred.cpu().numpy(), y_true.cpu().numpy()).correlation
-    return dict(MSE=mse, MAE=mae, R2=r2.item(), Pearson=pearson.item(), Spearman=spearman)
+    metrics['Pearson'] = (torch.sum(vx * vy) / (torch.norm(vx) * torch.norm(vy))).item()
+
+    # Spearman: Monotonic relationship (-1 to 1)
+    metrics['Spearman'] = spearmanr(y_pred.cpu().numpy(), y_true.cpu().numpy()).correlation
+
+    return metrics
+

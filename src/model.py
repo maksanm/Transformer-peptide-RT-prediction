@@ -52,7 +52,7 @@ class PeptideRTEncoderModel(nn.Module):
                                                    n_heads,
                                                    d_ff,
                                                    dropout,
-                                                   batch_first=True)  # (B, L, d)
+                                                   batch_first=True)  # (B, L, d_model)
         self.encoder = nn.TransformerEncoder(encoder_layer,
                                              num_layers=n_layers)
 
@@ -79,7 +79,7 @@ class PeptideRTEncoderModel(nn.Module):
 
         # Embedding lookup + add positional encoding
         # emb: (B, L, d_model)
-        emb = self.embed(seq_ids) + self.pos_enc[:L].unsqueeze(0)  # (1, L, d_model) broadcast
+        emb = self.embed(seq_ids) + self.pos_enc[:L].unsqueeze(0)  # (1, L, d_model)
 
         # Run encoder: (B, L, d_model)
         out = self.encoder(emb, src_key_padding_mask=key_padding_mask)  # (B, L, d_model)
@@ -94,7 +94,7 @@ class PeptideRTEncoderModel(nn.Module):
         out = (out * attn_weights).sum(dim=1)  # (B, d_model)
 
         # Regression head: map to scalar
-        pred = self.reg_head(out).squeeze(-1)            # (B,)
+        pred = self.reg_head(out).squeeze(-1) # (B,)
         return pred
 
 

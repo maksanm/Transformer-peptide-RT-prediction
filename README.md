@@ -24,15 +24,14 @@ poetry install
 
 ## How to Train
 
-The main training script is `src/rt_transformer.py`. It trains the model on a peptide RT dataset and saves the weights to either `rt_encoder_model.pt` or `rt_decoder_model.pt`, depending on the chosen architecture.
+The main training script, `src/rt_transformer.py`, requires `--data` and `--output` parameters: it trains the model on the specified peptide retention time dataset and saves the model weights to the given output path.
 
 **Example usage:**
 ```bash
-python src/rt_transformer.py --data data/mouse.txt --epochs 20 --d_model 256 --layers 10 --arch encoder
-python src/rt_transformer.py --data data/mouse.txt --epochs 20 --d_model 256 --layers 10 --arch decoder --queries 4
+poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 150 --d_model 64 --layers 5 --arch encoder --output encoder_model.pt
+poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 150 --d_model 64 --layers 5 --arch decoder --queries 4 --output decoder_model.pt
 ```
 - Use `--arch encoder` or `--arch decoder` to select the model architecture.
-- Use `--data` to specify your dataset (TXT file: `<peptide>\t<rt>`).
 - Other arguments control hyperparameters such as model size, number of layers, number of queries, learning rate, and more.
 
 ## Jupyter Notebooks

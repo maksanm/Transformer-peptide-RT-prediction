@@ -15,11 +15,13 @@ class PeptideRTDataset(Dataset):
     def __init__(self, txt_path: str, tokenizer: AATokenizer):
         self.samples: List[Tuple[torch.LongTensor, float]] = []
         self.tok = tokenizer
+        self.orig_seqs = []
         with open(txt_path) as f:
             for line in f:
                 if not line.strip():
                     continue
                 seq, rt = line.strip().split()
+                self.orig_seqs.append(seq)
                 # Encode sequence to tensor, store with RT as float
                 self.samples.append((self.tok.encode(seq), float(rt)))
 
@@ -28,6 +30,9 @@ class PeptideRTDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.samples[idx]
+
+    def decode(self, encoded_seq: torch.LongTensor):
+        return self.tok.decode(encoded_seq)
 
 def collate(batch, pad_id):
     """

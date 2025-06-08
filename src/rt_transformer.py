@@ -17,12 +17,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True,
                         help="TXT file:  <peptide>\\t<rt>")
+    parser.add_argument("--output", required=True)
     parser.add_argument("--batch", type=int, default=64)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--d_model", type=int, default=256)
-    parser.add_argument("--heads",   type=int, default=8)
-    parser.add_argument("--layers",  type=int, default=10)
-    parser.add_argument("--lr",      type=float, default=3e-4)
+    parser.add_argument("--epochs", type=int, default=150)
+    parser.add_argument("--d_model", type=int, default=64)
+    parser.add_argument("--heads",   type=int, default=4)
+    parser.add_argument("--layers",  type=int, default=5)
+    parser.add_argument("--lr",      type=float, default=2e-4)
     parser.add_argument("--seed",    type=int, default=42)
     parser.add_argument("--queries", type=int, default=4)
     parser.add_argument("--arch", choices=["encoder", "decoder"], default="encoder",
@@ -67,11 +68,7 @@ def main():
         tr_loss = run_epoch(model, train_loader, loss_fn, opt, device)
         vl_loss = run_epoch(model, val_loader,   loss_fn, None, device)
         print(f"Epoch {epoch:3d} | train loss {tr_loss:.4e} | val loss {vl_loss:.4e}")
-
-    if args.arch == "encoder":
-        torch.save(model.state_dict(), "rt_encoder_model.pt")
-    else:
-        torch.save(model.state_dict(), "rt_decoder_model.pt")
+        torch.save(model.state_dict(), args.output)
     print("✔ done.")
 
 if __name__ == "__main__":
