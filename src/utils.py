@@ -2,13 +2,11 @@ import random
 
 import torch
 from torch.utils.data import Dataset
-import numpy as np
-from typing import List, Tuple
 
 from scipy.stats import spearmanr
 
 
-def split_dataset(ds: Dataset, val_ratio=0.1, seed=42):
+def split_dataset(ds: Dataset, val_ratio=0.05, seed=42):
     """
     Split dataset into train/val subsets.
     """

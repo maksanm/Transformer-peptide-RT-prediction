@@ -18,19 +18,23 @@ def main():
     parser.add_argument("--data", required=True,
                         help="TXT file:  <peptide>\\t<rt>")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--batch", type=int, default=64)
+    parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--d_model", type=int, default=64)
     parser.add_argument("--heads",   type=int, default=4)
-    parser.add_argument("--layers",  type=int, default=5)
-    parser.add_argument("--lr",      type=float, default=2e-4)
+    parser.add_argument("--layers",  type=int, default=8)
+    parser.add_argument("--lr",      type=float, default=1e-4)
     parser.add_argument("--seed",    type=int, default=42)
     parser.add_argument("--queries", type=int, default=4)
     parser.add_argument("--arch", choices=["encoder", "decoder"], default="encoder",
                         help="Model architecture: encoder or decoder")
     args = parser.parse_args()
 
-    torch.manual_seed(args.seed); random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     tokenizer = AATokenizer()
     ds  = PeptideRTDataset(args.data, tokenizer)
@@ -50,7 +54,7 @@ def main():
             n_heads=args.heads,
             d_ff=4*args.d_model,
             n_layers=args.layers
-        ).to(device)
+        )
     else:
         model = PeptideRTDecoderModel(
             tokenizer,
@@ -59,9 +63,12 @@ def main():
             d_ff=4*args.d_model,
             n_layers=args.layers,
             n_queries=args.queries
-        ).to(device)
+        )
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+    model = model.to(device)
 
-    opt     = torch.optim.Adam(model.parameters(), lr=args.lr)
+    opt     = torch.optim.AdamW(model.parameters(), lr=args.lr)
     loss_fn = nn.SmoothL1Loss()
 
     for epoch in range(1, args.epochs+1):
