@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--data", required=True,
                         help="TXT file:  <peptide>\\t<rt>")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--batch", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--d_model", type=int, default=64)
     parser.add_argument("--heads",   type=int, default=4)

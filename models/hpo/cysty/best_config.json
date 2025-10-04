@@ -1,0 +1,10 @@
+{
+  "best_val": 0.0008643942295010135,
+  "best_epoch": 92,
+  "d_model": 96,
+  "n_layers": 5,
+  "n_heads": 6,
+  "lr": 0.0003,
+  "batch": 16,
+  "seed": 42
+}
