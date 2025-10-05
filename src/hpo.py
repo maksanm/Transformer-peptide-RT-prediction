@@ -34,7 +34,7 @@ from tokenizer import AATokenizer
 from utils import run_epoch, split_dataset, compute_metrics
 
 
-DATASET="cysty"
+DATASET="misc_dia"
 DATA = f"data/{DATASET}.txt"
 OUTPUT_DIR = f"models/hpo/{DATASET}/"
 SEED = 42
@@ -43,7 +43,7 @@ SEED = 42
 N_TRIALS = 150                # total HPO trials
 MAX_EPOCHS = 100              # max epochs per trial
 PATIENCE = 20                 # early stop inside a trial if no val improvement
-N_JOBS = 1                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
+N_JOBS = 2                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
 PIN_MEMORY = True
 
 # Search space
@@ -108,18 +108,15 @@ def get_trial_device(trial_number: int, base_device: torch.device) -> torch.devi
 
 def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
     def objective(trial: optuna.trial.Trial):
-        n_heads = trial.suggest_categorical("n_heads", HEAD_CHOICES)
-        d_model = trial.suggest_categorical("d_model", D_MODEL_CHOICES)
         n_layers = trial.suggest_categorical("n_layers", LAYER_CHOICES)
+        n_heads = trial.suggest_categorical("n_heads", HEAD_CHOICES)
+
+        valid_d_models = [d for d in D_MODEL_CHOICES if d % n_heads == 0]
+        # Use per-head parameter name to avoid Optuna dynamic categorical error
+        d_model = trial.suggest_categorical(f"d_model__h{n_heads}", valid_d_models)
+
         batch = BATCH_SIZE
         lr = LEARNING_RATE
-
-        # Early prune if d_model is not divisible by n_heads
-        if d_model % n_heads != 0:
-            raise optuna.TrialPruned()
-
-        print(f"[trial {trial.number:02d}] using config: "
-              f"d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}")
 
         hparams = {
             "d_model": d_model,
@@ -133,6 +130,9 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
         trial_device = get_trial_device(trial.number, device)
         if trial_device.type == "cuda":
             torch.cuda.set_device(trial_device)
+
+        print(f"[trial {trial.number:02d}] running on device {trial_device} using config: "
+              f"d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}")
 
         collate_fn = partial(collate, pad_id=tokenizer.pad_id)
         train_loader = DataLoader(
