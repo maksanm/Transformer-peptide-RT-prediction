@@ -9,7 +9,6 @@ HPO for Transformer encoder on peptide RT prediction using Bayesian optimization
 import os
 import json
 import time
-import math
 import random
 import shutil
 from pathlib import Path
@@ -22,7 +21,6 @@ import optuna
 from optuna.pruners import HyperbandPruner
 
 try:
-    # Optional: GP-based, highly sample-efficient sampler
     from optuna.integration import BoTorchSampler
     HAS_BOTORCH = True
 except Exception:
@@ -45,11 +43,11 @@ SEED = 42
 N_TRIALS = 150                # total HPO trials
 MAX_EPOCHS = 100              # max epochs per trial
 PATIENCE = 20                 # early stop inside a trial if no val improvement
-N_JOBS = 1                    # number of Optuna parallel jobs (processes)
+N_JOBS = 1                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
 PIN_MEMORY = True
 
 # Search space
-D_MODEL_CHOICES = [32, 64, 96, 128, 160, 192, 256]
+D_MODEL_CHOICES = [64, 96, 128, 160, 192, 256, 320]
 LAYER_CHOICES   = [1, 2, 3, 4, 5, 6, 7, 8, 10]
 HEAD_CHOICES    = [1, 2, 4, 6, 8]
 
@@ -66,17 +64,46 @@ def set_seed(seed: int):
     torch.backends.cudnn.benchmark = False
 
 def build_model(tokenizer, hparams, device):
+    """Build model on a specific device.
+
+    If multiple GPUs are available and we are running only one Optuna job (N_JOBS == 1),
+    we wrap the model in DataParallel to use all GPUs for a single trial. If we are
+    running multiple Optuna jobs in parallel (N_JOBS > 1), each trial should occupy
+    a single GPU to avoid resource contention, so we DO NOT wrap in DataParallel.
+    """
     model = PeptideRTEncoderModel(
         tokenizer,
         d_model=hparams["d_model"],
         n_heads=hparams["n_heads"],
-        d_ff=4*hparams["d_model"],
-        n_layers=hparams["n_layers"]
+        d_ff=4 * hparams["d_model"],
+        n_layers=hparams["n_layers"],
     )
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+    use_dp = torch.cuda.device_count() > 1 and N_JOBS == 1 and device.type == "cuda"
     model = model.to(device)
+    if use_dp:
+        print(f"Wrapping model in DataParallel across {torch.cuda.device_count()} GPUs")
+        model = torch.nn.DataParallel(model)
     return model
+
+
+def get_trial_device(trial_number: int, base_device: torch.device) -> torch.device:
+    """Select a device for a trial.
+
+    Strategy:
+    - If no CUDA: always CPU.
+    - If CUDA and N_JOBS == 1: use the base_device (cuda:0) and optionally DataParallel inside build_model.
+    - If CUDA and N_JOBS > 1: assign one GPU per trial deterministically so concurrent trials
+      don't fight over the same GPU. If there are less GPUs than N_JOBS, they will still share.
+    """
+    if base_device.type != "cuda":
+        return base_device
+    gpu_count = torch.cuda.device_count()
+    if gpu_count == 0:
+        return torch.device("cpu")
+    if N_JOBS <= 1:
+        return torch.device("cuda:0")
+    gpu_index = trial_number % gpu_count
+    return torch.device(f"cuda:{gpu_index}")
 
 
 def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
@@ -91,6 +118,9 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
         if d_model % n_heads != 0:
             raise optuna.TrialPruned()
 
+        print(f"[trial {trial.number:02d}] using config: "
+              f"d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}")
+
         hparams = {
             "d_model": d_model,
             "n_layers": n_layers,
@@ -99,17 +129,22 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
             "batch": batch,
         }
 
+        # Assign a (possibly different) GPU for this trial when running multi-job HPO
+        trial_device = get_trial_device(trial.number, device)
+        if trial_device.type == "cuda":
+            torch.cuda.set_device(trial_device)
+
         collate_fn = partial(collate, pad_id=tokenizer.pad_id)
         train_loader = DataLoader(
             train_ds, batch_size=batch, shuffle=True, collate_fn=collate_fn,
-            pin_memory=(PIN_MEMORY and device == "cuda")
+            pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
         )
         val_loader = DataLoader(
             val_ds, batch_size=batch, shuffle=False, collate_fn=collate_fn,
-            pin_memory=(PIN_MEMORY and device == "cuda")
+            pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
         )
 
-        model = build_model(tokenizer, hparams, device)
+        model = build_model(tokenizer, hparams, trial_device)
         opt = torch.optim.AdamW(model.parameters(), lr=lr)
         loss_fn = nn.SmoothL1Loss()
 
@@ -124,8 +159,8 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
         for epoch in range(1, MAX_EPOCHS + 1):
             t0 = time.time()
             try:
-                tr_loss = run_epoch(model, train_loader, loss_fn, opt, device)
-                vl_loss = run_epoch(model, val_loader,   loss_fn, None, device)
+                tr_loss = run_epoch(model, train_loader, loss_fn, opt, trial_device)
+                vl_loss = run_epoch(model, val_loader,   loss_fn, None, trial_device)
             except RuntimeError as e:
                 if "out of memory" in str(e).lower():
                     torch.cuda.empty_cache()
@@ -166,13 +201,20 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
 
         # After the trial, print statistics for the best epoch (best checkpoint)
         # Load best model
-        best_model = build_model(tokenizer, hparams, device)
-        best_model.load_state_dict(torch.load(trial_ckpt, map_location=device))
+        best_model = build_model(tokenizer, hparams, trial_device)
+        state_dict = torch.load(trial_ckpt, map_location=trial_device)
+        # Handle potential DataParallel 'module.' prefix differences gracefully
+        try:
+            best_model.load_state_dict(state_dict)
+        except RuntimeError:
+            # Strip 'module.' prefixes if needed
+            new_state = {k.split('module.', 1)[-1]: v for k, v in state_dict.items()}
+            best_model.load_state_dict(new_state)
         best_model.eval()
         all_preds, all_targets = [], []
         with torch.no_grad():
             for seqs, mask, rts in val_loader:
-                seqs, mask, rts = seqs.to(device), mask.to(device), rts.to(device)
+                seqs, mask, rts = seqs.to(trial_device), mask.to(trial_device), rts.to(trial_device)
                 preds = best_model(seqs, mask)
                 all_preds.append(preds.cpu())
                 all_targets.append(rts.cpu())
@@ -186,7 +228,8 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
         # Return the best validation loss obtained in this trial
         # (Optuna will keep the best over trials)
         del model
-        torch.cuda.empty_cache()
+        if trial_device.type == "cuda":
+            torch.cuda.empty_cache()
         return float(best_val)
 
     return objective
@@ -205,8 +248,8 @@ def main():
     if not Path(DATA).exists():
         raise FileNotFoundError(f"DATA not found: {DATA}")
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device} ({torch.cuda.device_count()} GPUs available)")
 
     # Prepare data once, keep split fixed across all trials
     tokenizer = AATokenizer()
