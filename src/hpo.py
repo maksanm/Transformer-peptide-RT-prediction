@@ -40,10 +40,12 @@ OUTPUT_DIR = f"models/hpo/{DATASET}/"
 SEED = 42
 
 # HPO settings
+# Using 150 total trials: with 315 total configs (7×9×5) and ~14% invalid (45 configs where d_model % n_head != 0),
+# we expect ≈129 valid evaluations - enough coverage given small search space
 N_TRIALS = 150                # total HPO trials
 MAX_EPOCHS = 100              # max epochs per trial
 PATIENCE = 20                 # early stop inside a trial if no val improvement
-N_JOBS = 2                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
+N_JOBS = 4                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
 PIN_MEMORY = True
 
 # Search space
@@ -52,8 +54,8 @@ LAYER_CHOICES   = [1, 2, 3, 4, 5, 6, 7, 8, 10]
 HEAD_CHOICES    = [1, 2, 4, 6, 8]
 
 # Fixed hyperparameters
-BATCH_SIZE     = 64            # fixed batch size
-LEARNING_RATE  = 3e-4          # fixed learning rate
+BATCH_SIZE     = 256            # fixed batch size
+LEARNING_RATE  = 1e-3          # fixed learning rate
 
 
 def set_seed(seed: int):
@@ -62,6 +64,7 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
 
 def build_model(tokenizer, hparams, device):
     """Build model on a specific device.
@@ -86,34 +89,49 @@ def build_model(tokenizer, hparams, device):
     return model
 
 
-def get_trial_device(trial_number: int, base_device: torch.device) -> torch.device:
-    """Select a device for a trial.
-
-    Strategy:
-    - If no CUDA: always CPU.
-    - If CUDA and N_JOBS == 1: use the base_device (cuda:0) and optionally DataParallel inside build_model.
-    - If CUDA and N_JOBS > 1: assign one GPU per trial deterministically so concurrent trials
-      don't fight over the same GPU. If there are less GPUs than N_JOBS, they will still share.
-    """
-    if base_device.type != "cuda":
-        return base_device
+def get_trial_device(trial_number: int) -> torch.device:
     gpu_count = torch.cuda.device_count()
     if gpu_count == 0:
         return torch.device("cpu")
-    if N_JOBS <= 1:
+    if N_JOBS == 1:
         return torch.device("cuda:0")
-    gpu_index = trial_number % gpu_count
-    return torch.device(f"cuda:{gpu_index}")
+    # Deterministic assignment for first N_JOBS trials
+    if trial_number < N_JOBS:
+        return torch.device(f"cuda:{trial_number % gpu_count}")
+    # Otherwise, use nvidia-smi to pick least-loaded GPU
+    import subprocess, re
+    try:
+        time.sleep(2)
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=index,utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits"
+            ],
+            capture_output=True, text=True, check=True
+        )
+        candidates = []
+        for line in result.stdout.strip().splitlines():
+            idx, util, mem_used, mem_total = [int(x.strip()) for x in line.split(",")]
+            mem_ratio = mem_used / (mem_total + 1e-6)
+            candidates.append((idx, util, mem_ratio))
+        if not candidates:
+            return torch.device("cuda:0")
+        # choose GPU with lowest util, then lowest memory ratio as tiebreaker
+        idx, _, _ = min(candidates, key=lambda x: (x[1], x[2]))
+        return torch.device(f"cuda:{idx}")
+    except Exception:
+        return torch.device("cuda:0")
 
 
-def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
+def objective_factory(tokenizer, train_ds, val_ds, checkpoint_dir):
     def objective(trial: optuna.trial.Trial):
         n_layers = trial.suggest_categorical("n_layers", LAYER_CHOICES)
         n_heads = trial.suggest_categorical("n_heads", HEAD_CHOICES)
+        d_model = trial.suggest_categorical("d_model", D_MODEL_CHOICES)
 
-        valid_d_models = [d for d in D_MODEL_CHOICES if d % n_heads == 0]
-        # Use per-head parameter name to avoid Optuna dynamic categorical error
-        d_model = trial.suggest_categorical(f"d_model__h{n_heads}", valid_d_models)
+        if d_model % n_heads != 0:
+            raise optuna.TrialPruned("d_model is not divisible by n_heads")
 
         batch = BATCH_SIZE
         lr = LEARNING_RATE
@@ -127,21 +145,21 @@ def objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir):
         }
 
         # Assign a (possibly different) GPU for this trial when running multi-job HPO
-        trial_device = get_trial_device(trial.number, device)
+        trial_device = get_trial_device(trial.number)
         if trial_device.type == "cuda":
             torch.cuda.set_device(trial_device)
 
-        print(f"[trial {trial.number:02d}] running on device {trial_device} using config: "
+        print(f"\n[trial {trial.number:02d}] running on device {trial_device} using config: "
               f"d_model={d_model}, n_layers={n_layers}, n_heads={n_heads}")
 
         collate_fn = partial(collate, pad_id=tokenizer.pad_id)
         train_loader = DataLoader(
             train_ds, batch_size=batch, shuffle=True, collate_fn=collate_fn,
-            pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
+            num_workers=0, pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
         )
         val_loader = DataLoader(
             val_ds, batch_size=batch, shuffle=False, collate_fn=collate_fn,
-            pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
+            num_workers=0, pin_memory=(PIN_MEMORY and trial_device.type == "cuda")
         )
 
         model = build_model(tokenizer, hparams, trial_device)
@@ -249,7 +267,10 @@ def main():
         raise FileNotFoundError(f"DATA not found: {DATA}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device} ({torch.cuda.device_count()} GPUs available)")
+    gpu_count = torch.cuda.device_count()
+    print(f"Using device: {device} ({gpu_count} GPUs available)")
+    if N_JOBS > gpu_count:
+        raise RuntimeError(f"N_JOBS ({N_JOBS}) > available GPUs ({gpu_count}): HPO blocked to prevent resource contention.")
 
     # Prepare data once, keep split fixed across all trials
     tokenizer = AATokenizer()
@@ -268,7 +289,7 @@ def main():
 
     study = optuna.create_study(direction="minimize", sampler=sampler, pruner=pruner, study_name="encoder_hpo")
 
-    objective = objective_factory(tokenizer, train_ds, val_ds, device, checkpoint_dir)
+    objective = objective_factory(tokenizer, train_ds, val_ds, checkpoint_dir)
     study.optimize(objective, n_trials=N_TRIALS, gc_after_trial=True, n_jobs=N_JOBS)
 
     # Persist best artifacts
