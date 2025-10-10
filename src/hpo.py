@@ -34,7 +34,7 @@ from tokenizer import AATokenizer
 from utils import run_epoch, split_dataset, compute_metrics
 
 
-DATASET="misc_dia"
+DATASET="cysty"
 DATA = f"data/{DATASET}.txt"
 OUTPUT_DIR = f"models/hpo/{DATASET}/"
 SEED = 42
@@ -45,7 +45,7 @@ SEED = 42
 N_TRIALS = 150                # total HPO trials
 MAX_EPOCHS = 100              # max epochs per trial
 PATIENCE = 20                 # early stop inside a trial if no val improvement
-N_JOBS = 4                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
+N_JOBS = 1                    # number of Optuna parallel jobs (processes); set >1 to parallelize trials
 PIN_MEMORY = True
 
 # Search space
@@ -54,8 +54,8 @@ LAYER_CHOICES   = [1, 2, 3, 4, 5, 6, 7, 8, 10]
 HEAD_CHOICES    = [1, 2, 4, 6, 8]
 
 # Fixed hyperparameters
-BATCH_SIZE     = 256            # fixed batch size
-LEARNING_RATE  = 1e-3          # fixed learning rate
+BATCH_SIZE     = 128            # fixed batch size
+LEARNING_RATE  = 5e-4           # fixed learning rate
 
 
 def set_seed(seed: int):

@@ -1,18 +1,21 @@
+
 # PeptideRT-Transformer
 
-A PyTorch implementation of a peptide retention time predictor using Transformer encoder or decoder architectures. The encoder model uses attention pooling over sequence embeddings, while the decoder model supports multiple learnable query tokens with cross-attention to peptide embeddings before the regression head. Both are configurable and GPU-ready for proteomics machine learning tasks.
+A PyTorch implementation for peptide retention time prediction using Transformer-based models. The main focus is on the encoder architecture, which leverages attention pooling over peptide sequence embeddings for accurate RT regression. The project is designed for proteomics machine learning tasks and is GPU-ready.
+
 
 ## Project Structure
 
 ```
 data/         # Peptide datasets (TXT: <peptide>\t<rt>)
-docs/         # Documentation
-src/          # Source code (model, dataset, tokenizer, utils, main script)
-PeptideRT_Encoder_Train.ipynb    # Jupyter notebook for encoder training
-PeptideRT_Encoder_Eval.ipynb     # Jupyter notebook for encoder evaluation
-PeptideRT_Decoder_Train.ipynb    # Jupyter notebook for decoder training
-PeptideRT_Decoder_Eval.ipynb     # Jupyter notebook for decoder evaluation
+docs/         # Documentation and figures
+src/          # Source code (model, dataset, tokenizer, hpo, utils, training script)
+train__cysty.ipynb, train__misc_dia.ipynb   # Jupyter notebooks for encoder training
+eval__cysty.ipynb, eval__misc_dia.ipynb     # Jupyter notebooks for encoder evaluation
 ```
+
+> **Note:** Decoder-based training and evaluation are also implemented. See below for command-line usage, and refer to the codebase and notebooks for more details.
+
 
 ## Installation
 
@@ -22,23 +25,29 @@ This project uses [Poetry](https://python-poetry.org/) for dependency management
 poetry install
 ```
 
+
 ## How to Train
 
-The main training script, `src/rt_transformer.py`, requires `--data` and `--output` parameters: it trains the model on the specified peptide retention time dataset and saves the model weights to the given output path.
+The main training script is `src/rt_transformer.py`. It requires `--data` and `--output` parameters, and supports various hyperparameters.
 
-**Example usage:**
+**Encoder example:**
 ```bash
 poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 150 --d_model 64 --layers 5 --arch encoder --output encoder_model.pt
+```
+
+**Decoder example:**
+```bash
 poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 150 --d_model 64 --layers 5 --arch decoder --queries 4 --output decoder_model.pt
 ```
-- Use `--arch encoder` or `--arch decoder` to select the model architecture.
-- Other arguments control hyperparameters such as model size, number of layers, number of queries, learning rate, and more.
+
+- Use `--arch encoder` (default) or `--arch decoder` to select the model architecture.
+- Other arguments: `--batch`, `--heads`, `--lr`, `--seed`, etc. See `src/rt_transformer.py` for all options.
+
 
 ## Jupyter Notebooks
 
-- **PeptideRT_Encoder_Train.ipynb**: Interactive training and exploration for the encoder model.
-- **PeptideRT_Encoder_Eval.ipynb**: Evaluation and visualization for the encoder model.
-- **PeptideRT_Decoder_Train.ipynb**: Interactive training and exploration for the decoder model.
-- **PeptideRT_Decoder_Eval.ipynb**: Evaluation and visualization for the decoder model.
+- **train__cysty.ipynb**, **train__misc_dia.ipynb**: Interactive training and exploration for the encoder model.
+- **eval__cysty.ipynb**, **eval__misc_dia.ipynb**: Evaluation and visualization for the encoder model.
+- Decoder model usage can be adapted similarly.
 
 ---

@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=150)
     parser.add_argument("--d_model", type=int, default=64)
     parser.add_argument("--heads",   type=int, default=4)
-    parser.add_argument("--layers",  type=int, default=8)
+    parser.add_argument("--layers",  type=int, default=5)
     parser.add_argument("--lr",      type=float, default=1e-4)
     parser.add_argument("--seed",    type=int, default=42)
     parser.add_argument("--queries", type=int, default=4)

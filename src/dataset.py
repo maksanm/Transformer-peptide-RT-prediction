@@ -25,17 +25,12 @@ class PeptideRTDataset(Dataset):
                 seq, rt = line.strip().split()
                 self.orig_seqs.append(seq)
                 rts.append(float(rt))
-        # Check if already normalized (all in [0,1])
         min_rt, max_rt = min(rts), max(rts)
-        if min_rt >= 0.0 and max_rt <= 1.0:
-            self.norm_stats = {"min": 0.0, "max": 1.0}
-            norm_rts = rts
-        else:
-            self.norm_stats = {"min": min_rt, "max": max_rt}
-            norm_rts = [
-                min(max((rt - min_rt) / (max_rt - min_rt), 0.0), 1.0) if max_rt > min_rt else 0.0
-                for rt in rts
-            ]
+        self.norm_stats = {"min": min_rt, "max": max_rt}
+        norm_rts = [
+            min(max((rt - min_rt) / (max_rt - min_rt), 0.0), 1.0) if max_rt > min_rt else 0.0
+            for rt in rts
+        ]
         for seq, norm_rt in zip(self.orig_seqs, norm_rts):
             self.samples.append((self.tok.encode(seq), norm_rt))
 
