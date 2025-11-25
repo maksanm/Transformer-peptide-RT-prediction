@@ -39,6 +39,9 @@ class PeptideRTEncoderModel(nn.Module):
                  dropout: float       = 0.1):
         super().__init__()
 
+        # Store tokenizer for dynamic masking during training
+        self.tokenizer = tokenizer
+
         # Embedding for amino acid tokens (with padding)
         self.embed = nn.Embedding(tokenizer.vocab_size, d_model, tokenizer.pad_id)
         # Register a fixed (non-trainable) sinusoidal PE as buffer
@@ -117,6 +120,9 @@ class PeptideRTDecoderModel(nn.Module):
                  n_queries: int       = 4,
                  dropout: float       = 0.1):
         super().__init__()
+
+        # Store tokenizer for dynamic masking during training
+        self.tokenizer = tokenizer
 
         # Embedding for amino acid tokens (with padding)
         self.embed = nn.Embedding(tokenizer.vocab_size, d_model, tokenizer.pad_id)

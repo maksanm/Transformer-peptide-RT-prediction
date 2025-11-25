@@ -2,8 +2,9 @@ import random
 
 import torch
 from torch.utils.data import Dataset
-
+from dataset import collate
 from scipy.stats import spearmanr
+import numpy as np
 
 
 def split_dataset(ds: Dataset, val_ratio=0.05, seed=42):
@@ -18,18 +19,42 @@ def split_dataset(ds: Dataset, val_ratio=0.05, seed=42):
     val_subset   = torch.utils.data.Subset(ds, val_idx)
     return train_subset, val_subset
 
-def run_epoch(model, loader, loss_fn, opt=None, device="cpu"):
+import numpy as np
+
+def mask_batch(seqs, pad_id, unk_id, mask_frac=0.10):
     """
-    Run one epoch (train if opt is given, else eval).
-    Returns average loss.
+    Randomly replaces 10o% of non-PAD and non-UNK tokens in each sequence with <unk> in the batch.
     """
+    maskable = (seqs != pad_id) & (seqs != unk_id)
+    masked_seqs = seqs.clone()
+    B, L = seqs.size()
+    for i in range(B):
+        # Get indices of maskable (non-PAD/UNK) positions
+        maskable_idxs = maskable[i].nonzero(as_tuple=True)[0].tolist()
+        if len(maskable_idxs) == 0:
+            continue
+        # Calculate how many positions to mask (at least 1)
+        n_mask = max(1, round(len(maskable_idxs) * mask_frac))
+        mask_pos = np.random.choice(maskable_idxs, n_mask, replace=False)
+        # Set selected positions to unk_id
+        masked_seqs[i, mask_pos] = unk_id
+    return masked_seqs
+
+def run_epoch(model, loader, loss_fn, opt=None, device="cpu",
+              mask_randomly=False, pad_id=None, unk_id=None, mask_frac=0.10, mask_batch_probability=0.5):
     total, total_loss = 0, 0.0
     train = opt is not None
-    model.train(train)  # set train/eval mode
+    model.train(train)
     for seqs, mask, rts in loader:
         seqs, mask, rts = seqs.to(device), mask.to(device), rts.to(device)
-        preds = model(seqs, mask)         # forward pass
-        loss  = loss_fn(preds, rts)       # compute loss
+        do_mask = False
+        if train and mask_randomly:
+            if random.random() < mask_batch_probability:
+                do_mask = True
+        if do_mask:
+            seqs = mask_batch(seqs, pad_id, unk_id, mask_frac=mask_frac)
+        preds = model(seqs, mask)
+        loss  = loss_fn(preds, rts)
         if train:
             opt.zero_grad(set_to_none=True)
             loss.backward()
