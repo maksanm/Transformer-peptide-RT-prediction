@@ -1,4 +1,5 @@
 import math
+import copy
 
 import torch
 import torch.nn as nn
@@ -101,6 +102,66 @@ class PeptideRTEncoderModel(nn.Module):
         return pred
 
 
+
+class CrossOnlyDecoderLayer(nn.Module):
+    """
+    Custom Decoder Layer that performs ONLY Cross-Attention (Queries <-> Memory)
+    and FeedForward. It skips Self-Attention among queries.
+
+    Structure (Post-LN style to match TransformerDecoderLayer defaults):
+      x = x + dropout(cross_attn(x, memory, memory))
+      x = norm1(x)
+      x = x + dropout(ff_block(x))
+      x = norm2(m)
+    """
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=nn.ReLU(), layer_norm_eps=1e-5, batch_first=False):
+        super().__init__()
+        self.cross_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
+
+        # Feed-Forward Network
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.dropout3 = nn.Dropout(dropout)
+
+        # Determine activation function
+        if isinstance(activation, str):
+            if activation == "relu":
+                self.activation = nn.ReLU()
+            elif activation == "gelu":
+                self.activation = nn.GELU()
+            else:
+                self.activation = nn.ReLU() # default
+        else:
+            self.activation = activation
+
+    def forward(self, tgt, memory, tgt_mask=None, memory_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
+        """
+        tgt: (T, B, E) if batch_first=False
+        memory: (S, B, E)
+        """
+        # Cross Attention: query=tgt, key=memory, value=memory
+        x = tgt
+
+        attn_out, attn_weights = self.cross_attn(query=x, key=memory, value=memory,
+                                                 key_padding_mask=memory_key_padding_mask,
+                                                 attn_mask=memory_mask)
+        x = x + self.dropout1(attn_out)
+        x = self.norm1(x)
+
+        # Feed Forward
+        ff_out = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        x = x + self.dropout2(ff_out)
+        x = self.norm2(x)
+
+        return x
+
+
 # ---------------------------  decoder model  ---------------------------------------- #
 class PeptideRTDecoderModel(nn.Module):
     """
@@ -118,7 +179,8 @@ class PeptideRTDecoderModel(nn.Module):
                  d_ff: int            = 4*128,
                  n_layers: int        = 4,
                  n_queries: int       = 4,
-                 dropout: float       = 0.1):
+                 dropout: float       = 0.1,
+                 disable_self_attn: bool = False):
         super().__init__()
 
         # Store tokenizer for dynamic masking during training
@@ -136,13 +198,23 @@ class PeptideRTDecoderModel(nn.Module):
         self.queries = nn.Parameter(torch.randn(n_queries, 1, d_model))
 
         # Transformer decoder: stack of identical layers
-        decoder_layer = nn.TransformerDecoderLayer(d_model,
-                                                   n_heads,
-                                                   d_ff,
-                                                   dropout,
-                                                   batch_first=False) # expects (seq, batch, d)
-        self.decoder = nn.TransformerDecoder(decoder_layer,
-                                             num_layers=n_layers)
+        if not disable_self_attn:
+            decoder_layer = nn.TransformerDecoderLayer(d_model,
+                                                       n_heads,
+                                                       d_ff,
+                                                       dropout,
+                                                       batch_first=False) # expects (seq, batch, d)
+        else:
+            decoder_layer = CrossOnlyDecoderLayer(d_model,
+                                                  n_heads,
+                                                  dim_feedforward=d_ff,
+                                                  dropout=dropout,
+                                                  batch_first=False)
+
+        # We manually stack layers instead of using nn.TransformerDecoder
+        # because nn.TransformerDecoder expects layers to have specific attributes (e.g. self_attn)
+        # which our CrossOnlyDecoderLayer might not have.
+        self.layers = nn.ModuleList([copy.deepcopy(decoder_layer) for _ in range(n_layers)])
 
         # Attention pooling over queries
         self.query_attn = nn.Linear(d_model, 1)  # (d_model) -> (1), shared for all queries
@@ -176,11 +248,14 @@ class PeptideRTDecoderModel(nn.Module):
         # tgt: (n_queries, B, d_model)
         tgt = self.queries.repeat(1, B, 1)               # (n_queries, B, d_model)
 
-        # Run decoder: cross-attends queries to memory (peptide sequence)
-        # memory_key_padding_mask: (B, L), True for PAD
-        out = self.decoder(tgt,
-                           memory,
-                           memory_key_padding_mask=key_padding_mask)
+
+        out = tgt
+        for layer in self.layers:
+            # We only pass arguments supported by both TransformerDecoderLayer and CrossOnlyDecoderLayer
+            # CrossOnlyDecoderLayer.forward(tgt, memory, tgt_mask, memory_mask, tgt_key_padding_mask, memory_key_padding_mask)
+            # Standard TransformerDecoderLayer also supports these.
+            out = layer(out, memory, memory_key_padding_mask=key_padding_mask)
+
         # out: (n_queries, B, d_model)
 
         # Attention pooling over queries
