@@ -10,20 +10,25 @@ A PyTorch implementation for peptide retention time prediction using Transformer
 data/         # Peptide datasets (TXT: <peptide>\t<rt>)
 docs/         # Documentation and figures
 src/          # Source code (model, dataset, tokenizer, hpo, utils, training script)
-train__cysty.ipynb, train__misc_dia.ipynb   # Jupyter notebooks for encoder training
-eval__cysty.ipynb, eval__misc_dia.ipynb     # Jupyter notebooks for encoder evaluation
+encoder_notebooks/  # Notebooks for training & evaluating Encoder models
+decoder_notebooks/  # Notebooks for training & evaluating Decoder models
 ```
 
-> **Note:** Decoder-based training and evaluation are also implemented. See below for command-line usage, and refer to the codebase and notebooks for more details.
+> **Note:** The `notebooks` have been organized by architecture for clarity.
 
 
 ## Installation
 
-This project uses [Poetry](https://python-poetry.org/) for dependency management. To install all dependencies, run:
+This project uses [Poetry](https://python-poetry.org/) to manage Python dependencies and virtual environments in a robust, reproducible way.
 
-```bash
-poetry install
-```
+1. **Install Poetry** (if not already installed):
+   Follow the instructions at [python-poetry.org/docs/](https://python-poetry.org/docs/)
+
+2. **Install project dependencies**:
+   ```bash
+   poetry install
+   ```
+   This will create a virtual environment and install all required packages (PyTorch, Optuna, etc.) specified in `pyproject.toml`.
 
 
 ## How to Train
@@ -43,11 +48,33 @@ poetry run python src/rt_transformer.py --data data/mouse.txt --epochs 150 --d_m
 - Use `--arch encoder` (default) or `--arch decoder` to select the model architecture.
 - Other arguments: `--batch`, `--heads`, `--lr`, `--seed`, etc. See `src/rt_transformer.py` for all options.
 
+## Hyperparameter Optimization (HPO)
+
+Automated hyperparameter tuning is available via separate scripts for each architecture. These use **Optuna** (with optional **BoTorch** sampling) to find optimal configurations.
+
+- **Encoder HPO**:
+  ```bash
+  poetry run python src/hpo_encoder.py
+  ```
+  *(optimizes: d_model, n_layers, n_heads)*
+
+- **Decoder HPO**:
+  ```bash
+  poetry run python src/hpo_decoder.py
+  ```
+  *(optimizes: d_model, n_layers, n_heads, n_queries, disable_self_attn)*
+
+*Note: Edit the configuration constants (e.g., `DATASET`, `N_TRIALS`) directly at the top of these Python scripts before running.*
+
 
 ## Jupyter Notebooks
 
-- **train__cysty.ipynb**, **train__misc_dia.ipynb**: Interactive training and exploration for the encoder model.
-- **eval__cysty.ipynb**, **eval__misc_dia.ipynb**: Evaluation and visualization for the encoder model.
-- Decoder model usage can be adapted similarly.
+Results, visualizations, and interactive training logs are available in the notebook directories:
 
----
+- **`encoder_notebooks/`**: Contains `train__*.ipynb` and `eval__*.ipynb` for the Encoder architecture.
+- **`decoder_notebooks/`**: Contains `train__*.ipynb` and `eval__*.ipynb` for the Decoder architecture (including masked training variants).
+
+To launch the notebook server within the poetry environment:
+```bash
+poetry run jupyter notebook
+```

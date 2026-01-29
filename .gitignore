@@ -1,5 +1,6 @@
 docs
-models/hpo/*/checkpoints
+models/hpo_encoder/*/checkpoints
+models/hpo_decoder/*/checkpoints
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
